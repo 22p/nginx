@@ -1,5 +1,4 @@
 FROM alpine:latest AS builder
-ENV PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig
 
 RUN apk add --no-cache \
         build-base \
@@ -16,7 +15,9 @@ RUN apk add --no-cache \
         rust \
         cargo \
         pkgconfig \
-        clang-dev
+        clang-dev \
+        libxslt-dev \
+        libxml2-dev
 
 WORKDIR /build
 
@@ -28,7 +29,7 @@ RUN OSSL_VER=$(curl -fsSL "https://api.github.com/repos/openssl/openssl/releases
  && tar -xzf openssl.tar.gz \
  && cd "openssl-${OSSL_VER}" \
  && ./Configure \
-        --prefix=/usr/local \
+        --prefix=/usr/local --libdir=lib \
         enable-ech \
         enable-ktls \
         no-legacy \
@@ -37,13 +38,23 @@ RUN OSSL_VER=$(curl -fsSL "https://api.github.com/repos/openssl/openssl/releases
  && make -j"$(nproc)" \
  && make install
 
-RUN NGX_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx/releases/latest" \
-        | jq -r '.tag_name' | sed 's/^release-//') \
- && echo "Building nginx ${NGX_VER}" \
- && curl -fsSL "https://nginx.org/download/nginx-${NGX_VER}.tar.gz" -o nginx.tar.gz \
+RUN NGX_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx/releases/latest" | jq -r '.tag_name') \
+ && echo "Downloading nginx ${NGX_VER#release-}" \
+ && curl -fsSL "https://github.com/nginx/nginx/releases/download/${NGX_VER}/nginx-${NGX_VER#release-}.tar.gz" -o nginx.tar.gz \
  && tar -xzf nginx.tar.gz \
- && mv "nginx-${NGX_VER}" nginx \
- && cd nginx \
+ && mv "nginx-${NGX_VER#release-}" nginx \
+ && NGX_ACME_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx-acme/releases/latest" | jq -r '.tag_name') \
+ && echo "Downloading nginx-acme ${NGX_ACME_VER}" \
+ && curl -fsSL "https://github.com/nginx/nginx-acme/releases/download/${NGX_ACME_VER}/nginx-acme-${NGX_ACME_VER#v}.tar.gz" -o nginx-acme.tar.gz \
+ && tar -xzf nginx-acme.tar.gz \
+ && mv "nginx-acme-${NGX_ACME_VER#v}" nginx-acme \
+ && NJS_VER=$(curl -fsSL "https://api.github.com/repos/nginx/njs/releases/latest" | jq -r '.tag_name') \
+ && echo "Downloading njs ${NJS_VER}" \
+ && curl -fsSL "https://github.com/nginx/njs/archive/refs/tags/${NJS_VER}.tar.gz" -o njs.tar.gz \
+ && tar -xzf njs.tar.gz \
+ && mv "njs-${NJS_VER}" njs
+
+RUN cd nginx \
  && ./configure \
         --prefix=/etc/nginx \
         --sbin-path=/usr/sbin/nginx \
@@ -87,18 +98,11 @@ RUN NGX_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx/releases/late
         --with-stream_ssl_preread_module \
         --with-cc-opt='-O2 -fstack-clash-protection -Wformat -Werror=format-security' \
         --with-ld-opt='-Wl,--as-needed,-O1,--sort-common -Wl,-z,pack-relative-relocs' \
+        --add-dynamic-module=/build/nginx-acme \
+        --add-dynamic-module=/build/njs/nginx \
  && make -j"$(nproc)" \
  && make install \
  && strip /usr/sbin/nginx
-
-RUN NGX_ACME_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx-acme/releases/latest" | jq -r '.tag_name') \
- && echo "Building nginx-acme ${NGX_ACME_VER}" \
- && curl -fsSL "https://github.com/nginx/nginx-acme/releases/download/${NGX_ACME_VER}/nginx-acme-${NGX_ACME_VER#v}.tar.gz" -o nginx-acme.tar.gz \
- && tar -xzf nginx-acme.tar.gz \
- && mv "nginx-acme-${NGX_ACME_VER#v}" nginx-acme \
- && cd nginx-acme \
- && export NGINX_BUILD_DIR=/build/nginx/objs \
- && cargo build --release
 
 FROM alpine:latest
 
@@ -125,9 +129,9 @@ RUN apk add --no-cache \
 COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
 COPY --from=builder /etc/nginx /etc/nginx
 COPY --from=builder /usr/local/bin/openssl /usr/local/bin/
-COPY --from=builder /usr/local/lib*/libssl.so.4 /usr/local/lib*/libcrypto.so.4 /usr/lib/
+COPY --from=builder /usr/local/lib/libssl.so.4 /usr/local/lib/libcrypto.so.4 /usr/local/lib
 COPY --from=builder /usr/local/ssl /usr/local/ssl
-COPY --from=builder /build/nginx-acme/target/release/libnginx_acme.so /usr/lib/nginx/modules/ngx_http_acme_module.so
+COPY --from=builder /usr/lib/nginx/modules /usr/lib/nginx/modules
 COPY nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80 443
