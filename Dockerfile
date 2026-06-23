@@ -35,7 +35,7 @@ RUN OSSL_VER=$(curl -fsSL "https://api.github.com/repos/openssl/openssl/releases
         no-tests \
         no-docs \
  && make -j"$(nproc)" \
- && make install_sw
+ && make install
 
 RUN NGX_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx/releases/latest" \
         | jq -r '.tag_name' | sed 's/^release-//') \
@@ -105,7 +105,6 @@ FROM alpine:latest
 RUN apk add --no-cache \
         pcre2 \
         zlib \
-        ca-certificates \
         tzdata \
         tini \
         curl \
@@ -127,6 +126,7 @@ COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
 COPY --from=builder /etc/nginx /etc/nginx
 COPY --from=builder /usr/local/bin/openssl /usr/local/bin/
 COPY --from=builder /usr/local/lib*/libssl.so.4 /usr/local/lib*/libcrypto.so.4 /usr/lib/
+COPY --from=builder /usr/local/ssl /usr/local/ssl
 COPY --from=builder /build/nginx-acme/target/release/libnginx_acme.so /usr/lib/nginx/modules/ngx_http_acme_module.so
 COPY nginx.conf /etc/nginx/nginx.conf
 
