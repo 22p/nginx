@@ -52,7 +52,11 @@ RUN NGX_VER=$(curl -fsSL "https://api.github.com/repos/nginx/nginx/releases/late
  && echo "Downloading njs ${NJS_VER}" \
  && curl -fsSL "https://github.com/nginx/njs/archive/refs/tags/${NJS_VER}.tar.gz" -o njs.tar.gz \
  && tar -xzf njs.tar.gz \
- && mv "njs-${NJS_VER}" njs
+ && mv "njs-${NJS_VER}" njs \
+ && git clone https://github.com/bellard/quickjs /build/quickjs \
+ && cd /build/quickjs \
+ && CFLAGS='-fPIC' make libquickjs.a \
+ && make install
 
 RUN cd nginx \
  && ./configure \
